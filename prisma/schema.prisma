@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Market {
+  id               String           @id
+  ticker           String           @unique
+  question         String
+  category         String
+  city             String
+  station          String
+  eventDate        DateTime
+  bracketLow       Float?
+  bracketHigh      Float?
+  settlementSource String?
+  status           String           @default("open")
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  snapshots        MarketSnapshot[]
+  edges            Edge[]
+}
+
+model MarketSnapshot {
+  id        String   @id @default(cuid())
+  marketId  String
+  market    Market   @relation(fields: [marketId], references: [id])
+  yesPrice  Float
+  noPrice   Float
+  yesBid    Float?
+  yesAsk    Float?
+  volume    Int?
+  timestamp DateTime @default(now())
+
+  @@index([marketId])
+  @@index([timestamp])
+}
+
+model Forecast {
+  id            String   @id @default(cuid())
+  station       String
+  targetDate    DateTime
+  fetchedAt     DateTime @default(now())
+  source        String
+  pointForecast Float
+  forecastLow   Float?
+  forecastHigh  Float?
+  stdDev        Float?
+  rawData       String?
+
+  @@index([station, targetDate])
+}
+
+model Edge {
+  id               String   @id @default(cuid())
+  marketId         String
+  market           Market   @relation(fields: [marketId], references: [id])
+  forecastId       String?
+  modelProb        Float
+  marketProb       Float
+  expectedProfit   Float    // Expected $ profit per contract (best of YES/NO)
+  expectedProfitYes Float   // Expected $ if buying YES at ask
+  expectedProfitNo  Float   // Expected $ if buying NO at ask
+  direction        String   // "BUY_YES" | "BUY_NO" | "NO_TRADE"
+  confidence       Float
+  timestamp        DateTime @default(now())
+
+  @@index([marketId])
+  @@index([timestamp])
+}
+
+model SystemLog {
+  id        String   @id @default(cuid())
+  level     String
+  source    String
+  message   String
+  metadata  String?
+  timestamp DateTime @default(now())
+
+  @@index([level])
+  @@index([timestamp])
+}
+
+model Settings {
+  id        String   @id @default("default")
+  city      String   @default("los_angeles")
+  mode      String   @default("paper")
+  config    String?  // JSON string for other config
+  updatedAt DateTime @updatedAt
+}
