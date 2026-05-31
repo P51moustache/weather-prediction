@@ -38,7 +38,7 @@ npm install
 
 # Set up environment variables
 cp .env.example .env
-# Edit .env with your API keys (optional for demo mode)
+# Edit .env with your real Kalshi API key and RSA private-key path (required)
 
 # Initialize database
 npx prisma db push
@@ -53,9 +53,11 @@ Visit `http://localhost:3000` to see the dashboard.
 
 ```env
 DATABASE_URL="file:./dev.db"
-KALSHI_API_KEY="your_kalshi_api_key"      # Optional - uses mock data if not set
-KALSHI_API_SECRET="your_kalshi_api_secret" # Optional
+KALSHI_API_KEY="your_kalshi_api_key"                  # Required - the app fetches live data and errors if unset
+KALSHI_PRIVATE_KEY_PATH="./kalshi-private-key.pem"    # Required - path to your Kalshi RSA private key (PEM) used to sign requests
 ```
+
+> **Note:** This app fetches live data from Kalshi and the NWS. There is no mock/demo mode — `POST /api/sync` will return an error if the Kalshi credentials above are not configured. Get an API key and download the RSA private key from your Kalshi account settings, save the `.pem` file locally (it is gitignored), and point `KALSHI_PRIVATE_KEY_PATH` at it.
 
 ## Usage
 

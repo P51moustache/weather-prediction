@@ -127,7 +127,11 @@ export async function POST() {
     logs.push(`Fetched ${markets.length} Kalshi markets`);
     logs.push(`Fetched ${forecasts.length} NWS forecasts`);
 
-    // Store markets
+    // Store markets FIRST so their rows exist before any child
+    // (MarketSnapshot / Edge) references them. We track which ids were
+    // actually persisted so child writes can only ever reference a parent
+    // that exists — otherwise Prisma raises a foreign-key constraint error.
+    const persistedMarketIds = new Set<string>();
     for (const market of markets) {
       await prisma.market.upsert({
         where: { id: market.id },
@@ -148,13 +152,20 @@ export async function POST() {
           settlementSource: market.settlementSource,
         },
       });
+      persistedMarketIds.add(market.id);
     }
 
-    // Store snapshots
+    // Store snapshots. Use a nested `connect` so the parent relation is
+    // explicit, and skip any quote whose market was not persisted to avoid
+    // a foreign-key error.
+    let snapshotsStored = 0;
     for (const quote of quotes) {
+      if (!persistedMarketIds.has(quote.marketId)) {
+        continue;
+      }
       await prisma.marketSnapshot.create({
         data: {
-          marketId: quote.marketId,
+          market: { connect: { id: quote.marketId } },
           yesPrice: quote.yesPrice,
           noPrice: quote.noPrice,
           yesBid: quote.yesBid,
@@ -162,8 +173,9 @@ export async function POST() {
           volume: quote.volume,
         },
       });
+      snapshotsStored += 1;
     }
-    logs.push(`Stored ${quotes.length} market snapshots`);
+    logs.push(`Stored ${snapshotsStored} market snapshots`);
 
     // Store forecasts
     for (const forecast of forecasts) {
@@ -188,11 +200,16 @@ export async function POST() {
     const edges = detectEdges(markets, quotes, modelProbs);
     logs.push(`Detected ${edges.length} edges`);
 
-    // Store edges
+    // Store edges. Like snapshots, connect to the persisted parent market and
+    // skip any edge whose market row is missing to avoid a foreign-key error.
+    let edgesStored = 0;
     for (const edge of edges) {
+      if (!persistedMarketIds.has(edge.marketId)) {
+        continue;
+      }
       await prisma.edge.create({
         data: {
-          marketId: edge.marketId,
+          market: { connect: { id: edge.marketId } },
           modelProb: edge.modelProbability,
           marketProb: edge.marketProbability,
           expectedProfit: edge.expectedProfit,
@@ -202,8 +219,9 @@ export async function POST() {
           confidence: edge.confidence,
         },
       });
+      edgesStored += 1;
     }
-    logs.push("Stored edges");
+    logs.push(`Stored ${edgesStored} edges`);
 
     // Log the sync
     await prisma.systemLog.create({
@@ -253,7 +271,7 @@ export async function POST() {
         success: false,
         logs,
         error: errorMessage,
-        hint: "Make sure KALSHI_API_KEY is set in your .env file for market data"
+        hint: "Make sure KALSHI_API_KEY and KALSHI_PRIVATE_KEY_PATH are set in your .env file for market data"
       },
       { status: 500 }
     );

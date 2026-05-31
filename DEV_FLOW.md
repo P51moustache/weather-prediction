@@ -68,15 +68,14 @@ npm run test:e2e     # Run Playwright tests
 ## Environment Setup
 
 1. Copy `.env.example` to `.env`
-2. Configure API keys (optional for mock mode)
+2. Set `KALSHI_API_KEY` and `KALSHI_PRIVATE_KEY_PATH` (path to your Kalshi RSA private-key `.pem`). These are required — there is no mock mode.
 3. Run `npx prisma db push` to initialize database
 
-## Mock Data Mode
+## Live Data Only
 
-When Kalshi/NWS APIs are unavailable or unconfigured:
-- System automatically falls back to mock data
-- Mock data simulates realistic LA temperature markets
-- Useful for development and testing
+This app fetches live data from Kalshi and the NWS; it does **not** ship a mock/demo mode:
+- `POST /api/sync` returns an error if Kalshi credentials are missing or the APIs are unreachable.
+- Un-quoted markets (no resting bid/ask) are handled gracefully and simply produce no edge, rather than crashing the sync.
 
 ## Troubleshooting
 

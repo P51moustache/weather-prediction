@@ -156,18 +156,36 @@ export function detectEdges(
     const marketProbability = quote.impliedProbability;
     const modelProbability = modelProb.modelProbability;
 
+    // Guard against un-quoted / malformed markets. If any price input is not a
+    // finite, in-range number we cannot compute a meaningful edge, so treat it
+    // as "no edge" rather than letting NaN propagate into the DB (Prisma Float
+    // columns reject NaN) or the UI.
+    const hasUsableQuote =
+      Number.isFinite(quote.yesAsk) &&
+      Number.isFinite(quote.yesBid) &&
+      Number.isFinite(marketProbability) &&
+      Number.isFinite(modelProbability) &&
+      quote.yesAsk > 0 &&
+      quote.yesAsk < 1 &&
+      quote.yesBid > 0 &&
+      quote.yesBid < 1;
+
     // Calculate expected profit for each side (buy and hold to expiration)
-    const expectedProfitYes = calculateExpectedProfitYes(modelProbability, quote.yesAsk);
-    const expectedProfitNo = calculateExpectedProfitNo(modelProbability, quote.yesBid);
+    const expectedProfitYes = hasUsableQuote
+      ? calculateExpectedProfitYes(modelProbability, quote.yesAsk)
+      : 0;
+    const expectedProfitNo = hasUsableQuote
+      ? calculateExpectedProfitNo(modelProbability, quote.yesBid)
+      : 0;
 
     // Determine trade direction and edge
     let direction: "BUY_YES" | "BUY_NO" | "NO_TRADE" = "NO_TRADE";
     let expectedProfit = 0;
 
-    if (expectedProfitYes > 0 && expectedProfitYes >= expectedProfitNo) {
+    if (hasUsableQuote && expectedProfitYes > 0 && expectedProfitYes >= expectedProfitNo) {
       direction = "BUY_YES";
       expectedProfit = expectedProfitYes;
-    } else if (expectedProfitNo > 0 && expectedProfitNo > expectedProfitYes) {
+    } else if (hasUsableQuote && expectedProfitNo > 0 && expectedProfitNo > expectedProfitYes) {
       direction = "BUY_NO";
       expectedProfit = expectedProfitNo;
     }
@@ -195,17 +213,17 @@ export function detectEdges(
       bracketLow: market.bracketLow,
       bracketHigh: market.bracketHigh,
       eventDate: market.eventDate,
-      modelProbability,
-      marketProbability,
-      expectedProfit,
-      expectedProfitYes,
-      expectedProfitNo,
+      modelProbability: Number.isFinite(modelProbability) ? modelProbability : 0,
+      marketProbability: Number.isFinite(marketProbability) ? marketProbability : 0,
+      expectedProfit: Number.isFinite(expectedProfit) ? expectedProfit : 0,
+      expectedProfitYes: Number.isFinite(expectedProfitYes) ? expectedProfitYes : 0,
+      expectedProfitNo: Number.isFinite(expectedProfitNo) ? expectedProfitNo : 0,
       confidence: confidenceResult.score,
       confidenceFactors: confidenceResult.factors,
-      yesPrice: quote.yesPrice,
-      yesBid: quote.yesBid,
-      yesAsk: quote.yesAsk,
-      volume: quote.volume,
+      yesPrice: Number.isFinite(quote.yesPrice) ? quote.yesPrice : 0,
+      yesBid: Number.isFinite(quote.yesBid) ? quote.yesBid : 0,
+      yesAsk: Number.isFinite(quote.yesAsk) ? quote.yesAsk : 0,
+      volume: Number.isFinite(quote.volume) ? quote.volume : 0,
       direction,
       timestamp: new Date(),
     });

@@ -4,7 +4,8 @@ import {
   getTradeableEdges,
   summarizeEdges,
 } from "@/core/edgeDetector";
-import { NormalizedMarket, NormalizedQuote } from "@/connectors/kalshi/types";
+import { KalshiClient } from "@/connectors/kalshi/client";
+import { KalshiMarket, NormalizedMarket, NormalizedQuote } from "@/connectors/kalshi/types";
 import { BracketProbabilityResult } from "@/core/weatherProbEngine";
 
 describe("edgeDetector", () => {
@@ -195,6 +196,80 @@ describe("edgeDetector", () => {
 
       expect(summary.totalMarkets).toBe(0);
       expect(summary.bestOpportunity).toBeNull();
+    });
+  });
+
+  // Regression: un-quoted Kalshi markets (missing yes_ask/yes_bid/last_price)
+  // used to produce NaN prices in normalizeQuote, which then crashed the sync
+  // (Prisma rejects NaN) and rendered every edge as null. Verify the quote and
+  // the resulting edge are fully finite and resolve to a clean NO_TRADE.
+  describe("un-quoted markets (NaN regression)", () => {
+    // A KalshiMarket with NO resting quotes on either side. yes_ask/yes_bid/
+    // last_price are absent (undefined), mirroring a thin Kalshi market.
+    const unquotedRaw = {
+      ticker: "KXHIGHNY-26JAN22-T47",
+      event_ticker: "KXHIGHNY-26JAN22",
+      title: "Will the high in NY be 47°F?",
+      status: "open",
+      expiration_time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      floor_strike: 46,
+      cap_strike: 48,
+      // yes_ask / yes_bid / no_ask / no_bid / last_price intentionally omitted
+      volume: 0,
+    } as unknown as KalshiMarket;
+
+    it("normalizeQuote never yields NaN for an un-quoted market", () => {
+      const client = new KalshiClient();
+      const quote = client.normalizeQuote(unquotedRaw);
+
+      for (const [key, value] of Object.entries(quote)) {
+        if (typeof value === "number") {
+          expect(Number.isNaN(value), `${key} should not be NaN`).toBe(false);
+          expect(Number.isFinite(value), `${key} should be finite`).toBe(true);
+        }
+      }
+      // With no quote, the YES price (and implied probability) must default to 0.
+      expect(quote.yesPrice).toBe(0);
+      expect(quote.impliedProbability).toBe(0);
+    });
+
+    it("detectEdges produces a finite NO_TRADE edge for an un-quoted market", () => {
+      const client = new KalshiClient();
+      const market = client.normalizeMarket(unquotedRaw);
+      const quote = client.normalizeQuote(unquotedRaw);
+
+      const modelProb: BracketProbabilityResult = {
+        marketId: market.id,
+        bracketLow: market.bracketLow,
+        bracketHigh: market.bracketHigh,
+        modelProbability: 0.5,
+        distribution: { mean: 47, stdDev: 3 },
+      };
+
+      const edges = detectEdges([market], [quote], [modelProb]);
+
+      expect(edges.length).toBe(1);
+      const edge = edges[0];
+
+      // No NaN anywhere in the persisted-shape fields (these map to Prisma Floats).
+      for (const value of [
+        edge.modelProbability,
+        edge.marketProbability,
+        edge.expectedProfit,
+        edge.expectedProfitYes,
+        edge.expectedProfitNo,
+        edge.confidence,
+        edge.yesPrice,
+        edge.yesBid,
+        edge.yesAsk,
+      ]) {
+        expect(Number.isNaN(value)).toBe(false);
+        expect(Number.isFinite(value)).toBe(true);
+      }
+
+      // An un-quoted market has no actionable edge.
+      expect(edge.direction).toBe("NO_TRADE");
+      expect(edge.expectedProfit).toBe(0);
     });
   });
 });

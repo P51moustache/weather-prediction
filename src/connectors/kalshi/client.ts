@@ -312,28 +312,55 @@ export class KalshiClient {
 
   /**
    * Normalize market quote data
+   *
+   * Kalshi prices are in cents (0-100). Un-quoted markets (no resting
+   * orders on a side) return `undefined`/missing `yes_ask`/`yes_bid`/
+   * `last_price`. Dividing those by 100 yields `NaN`, which then poisons
+   * every downstream price and crashes the Prisma write (Float columns
+   * reject NaN). We guard every field so a missing quote produces a clean
+   * 0 ("no quote / no edge") rather than NaN.
    */
   normalizeQuote(market: KalshiMarket): NormalizedQuote {
-    // Kalshi prices are in cents (0-100)
-    const yesAsk = market.yes_ask / 100;
-    const yesBid = market.yes_bid / 100;
-    // Use midpoint of bid/ask as the market price (matches Kalshi's display)
-    // Fall back to last_price if no bid/ask available
-    const yesPrice = (yesBid > 0 && yesAsk > 0)
-      ? (yesBid + yesAsk) / 2
-      : market.last_price / 100;
+    // Convert a raw cents value to a 0..1 price, returning null when the
+    // value is missing or not a finite number (un-quoted side).
+    const centsToPrice = (cents: number | undefined | null): number | null => {
+      if (cents === undefined || cents === null || !Number.isFinite(cents)) {
+        return null;
+      }
+      return cents / 100;
+    };
+
+    const yesAskRaw = centsToPrice(market.yes_ask);
+    const yesBidRaw = centsToPrice(market.yes_bid);
+    const lastPriceRaw = centsToPrice(market.last_price);
+
+    // A market is "quoted" only if it has a usable price reference. Prefer the
+    // bid/ask midpoint (matches Kalshi's display), fall back to last_price.
+    let yesPrice: number | null = null;
+    if (yesBidRaw !== null && yesBidRaw > 0 && yesAskRaw !== null && yesAskRaw > 0) {
+      yesPrice = (yesBidRaw + yesAskRaw) / 2;
+    } else if (lastPriceRaw !== null && lastPriceRaw > 0) {
+      yesPrice = lastPriceRaw;
+    }
+
+    // For any side without a quote, emit 0 (never NaN). With yesAsk = 0 the
+    // edge calc's expectedProfitYes is <= 0, and with yesBid = 0 the noAsk is
+    // 1 (a sure loss), so both sides correctly resolve to "no edge".
+    const yesAsk = yesAskRaw ?? 0;
+    const yesBid = yesBidRaw ?? 0;
+    const safeYesPrice = yesPrice ?? 0;
 
     return {
       marketId: market.ticker,
       ticker: market.ticker,
-      yesPrice,
-      noPrice: 1 - yesPrice,
+      yesPrice: safeYesPrice,
+      noPrice: 1 - safeYesPrice,
       yesBid,
       yesAsk,
       noBid: 1 - yesAsk,
       noAsk: 1 - yesBid,
-      volume: market.volume,
-      impliedProbability: yesPrice,
+      volume: Number.isFinite(market.volume) ? market.volume : 0,
+      impliedProbability: safeYesPrice,
       timestamp: new Date(),
     };
   }
