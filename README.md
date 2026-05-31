@@ -1,6 +1,6 @@
 # Weather Edge Dashboard
 
-A production-grade web application for detecting trading edges in Kalshi weather markets using quantitative weather model analysis.
+A web application for detecting trading edges in Kalshi weather markets using quantitative weather model analysis.
 
 ## Overview
 
