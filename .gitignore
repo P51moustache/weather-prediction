@@ -43,3 +43,6 @@ prisma/dev.db-journal
 # IDE
 .idea
 .vscode
+.claude/
+CLAUDE.md
+.cursor/
